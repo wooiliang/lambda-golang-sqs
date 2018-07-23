@@ -1,0 +1,206 @@
+service: lambda-golang-sqs
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+
+provider:
+  name: aws
+  runtime: go1.x
+
+# you can overwrite defaults here
+  stage: dev
+  region: ap-southeast-1
+
+# you can add statements to the Lambda function's IAM Role here
+  iamRoleStatements:
+    # - Effect: "Allow"
+    #   Action:
+    #     - "s3:ListBucket"
+    #   Resource: { "Fn::Join" : ["", ["arn:aws:s3:::", { "Ref" : "ServerlessDeploymentBucket" } ] ]  }
+    # - Effect: "Allow"
+    #   Action:
+    #     - "s3:PutObject"
+    #   Resource:
+    #     Fn::Join:
+    #       - ""
+    #       - - "arn:aws:s3:::"
+    #         - "Ref" : "ServerlessDeploymentBucket"
+    #         - "/*"
+    - Effect: "Allow"
+      Action:
+        - "sqs:ReceiveMessage"
+        - "sqs:DeleteMessage"
+        - "sqs:GetQueueAttributes"
+        - "dynamodb:PutItem"
+      Resource: "*"
+
+# you can define service wide environment variables here
+#  environment:
+#    variable1: value1
+
+package:
+ exclude:
+   - ./**
+ include:
+   - ./bin/**
+
+functions:
+  # hello:
+  #   handler: bin/hello
+  # world:
+  #   handler: bin/world
+  main:
+    handler: bin/main
+
+#    The following are a few example events you can configure
+#    NOTE: Please make sure to change your handler code to work with those events
+#    Check the event documentation for details
+# events:
+#    events:
+#      - http:
+#          path: users/create
+#          method: get
+#      - s3: ${env:BUCKET}
+#      - schedule: rate(10 minutes)
+#      - sns: greeter-topic
+#      - stream: arn:aws:dynamodb:region:XXXXXX:table/foo/stream/1970-01-01T00:00:00.000
+#      - alexaSkill: amzn1.ask.skill.xx-xx-xx-xx
+#      - alexaSmartHome: amzn1.ask.skill.xx-xx-xx-xx
+#      - iot:
+#          sql: "SELECT * FROM 'some_topic'"
+#      - cloudwatchEvent:
+#          event:
+#            source:
+#              - "aws.ec2"
+#            detail-type:
+#              - "EC2 Instance State-change Notification"
+#            detail:
+#              state:
+#                - pending
+#      - cloudwatchLog: '/aws/lambda/hello'
+#      - cognitoUserPool:
+#          pool: MyUserPool
+#          trigger: PreSignUp
+
+#    Define function environment variables here
+#    environment:
+#      variable2: value2
+
+# you can add CloudFormation resource templates here
+resources:
+  Resources:
+    DynamoDBEmployerActivities:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: "id"
+            AttributeType: "S"
+        KeySchema:
+          -
+            AttributeName: "id"
+            KeyType: "HASH"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: LambdaGolangSQS
+    SQSActivities:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: LambdaGolangSQS
+    Role:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - 
+              Effect: "Allow"
+              Principal: 
+                Service: 
+                  - "codebuild.amazonaws.com"
+                  - "codepipeline.amazonaws.com"
+              Action: 
+                - "sts:AssumeRole"
+        Policies:
+          - 
+            PolicyName: ${self:service}
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - 
+                  Effect: "Allow"
+                  Action: "*"
+                  Resource: "*"
+    CodeCommit:
+      Type: "AWS::CodeCommit::Repository"
+      Properties:
+        RepositoryName: ${self:service}
+    CodeBuild:
+      Type: "AWS::CodeBuild::Project"
+      Properties:
+        Name: ${self:service}
+        Artifacts:
+          Type: CODEPIPELINE
+        BadgeEnabled: false
+        Environment:
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: aws/codebuild/golang:1.10
+          Type: LINUX_CONTAINER
+        ServiceRole: 
+          Ref: Role
+        Source:
+          GitCloneDepth: 1
+          Type: CODEPIPELINE
+    S3:
+      Type: "AWS::S3::Bucket"
+      Properties:
+        BucketName: ${self:service}
+    CodePipeline:
+      Type: "AWS::CodePipeline::Pipeline"
+      Properties:
+        ArtifactStore:
+          Location:
+            Ref: S3
+          Type: S3
+        Name: ${self:service}
+        RoleArn:
+          Fn::GetAtt: Role.Arn
+        Stages:
+          - 
+            Name: Source
+            Actions:
+              - 
+                Name: Source
+                ActionTypeId:
+                  Category: Source
+                  Owner: AWS
+                  Provider: CodeCommit
+                  Version: 1
+                Configuration:
+                  RepositoryName:
+                    Fn::GetAtt: CodeCommit.Name
+                  BranchName: master
+                OutputArtifacts:
+                  - 
+                    Name: ${self:service}
+                RunOrder: 1
+          - 
+            Name: Build
+            Actions:
+              - 
+                Name: Build
+                ActionTypeId:
+                  Category: Build
+                  Owner: AWS
+                  Provider: CodeBuild
+                  Version: 1
+                Configuration:
+                  ProjectName:
+                    Ref: CodeBuild
+                InputArtifacts:
+                  - 
+                    Name: ${self:service}
+                RunOrder: 1
+

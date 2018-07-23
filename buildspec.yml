@@ -1,0 +1,19 @@
+version: 0.2
+phases:
+  install:
+    commands:
+      - curl -sL https://deb.nodesource.com/setup_8.x | sudo -E bash -
+      - sudo apt-get install -y nodejs
+      - npm install -g serverless
+  build:
+    commands:
+      # fix "root project import: dep does not currently support using GOPATH/src as the project root" issue
+      - mkdir git
+      - tar -czvf git/archive.tar.gz --exclude=./git .
+      - cd git
+      - tar -xzvf archive.tar.gz
+      - make
+      - go test -v ./...
+  post_build:
+    commands:
+      - sls deploy -v
